@@ -196,6 +196,34 @@ int main(int argc, char *argv[])
     fwrite(&length, 1, 4, f);
 
     for (size_t i = 0; i <= curblk; i++) {
+        if (
+               (curblk - i) >= 4 
+            && blk[i+0].type == BTYPE_PASS1B
+            && blk[i+1].type == BTYPE_PASS1B
+        ) {
+            if (
+                   blk[i+2].type == BTYPE_PASS1B
+                && blk[i+3].type == BTYPE_PASS1B
+            ) {
+                block_t b;
+                b.type = BTYPE_PASS4B;
+                b.data[0] = blk[i+0].data[0];
+                b.data[1] = blk[i+1].data[0];
+                b.data[2] = blk[i+2].data[0];
+                b.data[3] = blk[i+3].data[0];
+                final_bitcount += write_block(f, b);
+                i += 3;
+                continue;
+            } else {
+                block_t b;
+                b.type = BTYPE_PASS2B;
+                b.data[0] = blk[i+0].data[0];
+                b.data[1] = blk[i+1].data[0];
+                final_bitcount += write_block(f, b);
+                i += 1;
+                continue;
+            }
+        }
         final_bitcount += write_block(f, blk[i]);
     }
 
