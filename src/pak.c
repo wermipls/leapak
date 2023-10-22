@@ -39,7 +39,7 @@ static inline size_t compare(uint8_t *a, uint8_t *b, size_t bytes)
 static inline int is_offset_valid(size_t offset, size_t length)
 {
     size_t max_offset = OFFSET_MAX + length;
-    return offset <= max_offset;
+    return offset < max_offset;
 }
 
 match_t find_best_match(stream_t *s)
