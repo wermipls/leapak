@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define OFFSET_BITS 11
+#define OFFSET_BITS 13
 #define LENGTH_BITS 5
 #define OFFSET_MAX (1 << OFFSET_BITS)
 #define LENGTH_MAX (1 << LENGTH_BITS)
