@@ -35,16 +35,16 @@ int main(int argc, char *argv[])
         b.type = stream_read_bits(s, TYPE_BITS);
         switch (b.type)
         {
-        case BTYPE_MATCH:
-            b.offset = stream_read_bits(s, OFFSET_BITS-8) << 8;
+        case BTYPE_MATCH: {
+            b.offset = stream_read_bits(s, LONG_OFFSET_BITS-8) << 8;
             b.offset |= stream_read_bits(s, 8);
-            b.len = stream_read_bits(s, LENGTH_BITS);
+            b.len = stream_read_bits(s, LONG_LENGTH_BITS);
 
             size_t pos = ftell(f);
             int offset = b.offset + b.len + 1;
             fseek(f, -offset, SEEK_CUR);
 
-            uint8_t data[LENGTH_MAX]; // lazy hack
+            uint8_t data[LONG_LENGTH_MAX]; // lazy hack
             fread(data, 1, b.len+1, f);
 
             fseek(f, pos, SEEK_SET);
@@ -52,24 +52,38 @@ int main(int argc, char *argv[])
 
             length -= b.len+1;
             break;
+        }
+        case BTYPE_MATCH_SHORT: {
+            b.offset = stream_read_bits(s, SHORT_OFFSET_BITS);
+            b.len = stream_read_bits(s, SHORT_LENGTH_BITS);
+
+            size_t pos = ftell(f);
+            int offset = b.offset + b.len + 1;
+            fseek(f, -offset, SEEK_CUR);
+
+            uint8_t data[SHORT_LENGTH_MAX]; // lazy hack
+            fread(data, 1, b.len+1, f);
+
+            fseek(f, pos, SEEK_SET);
+            fwrite(data, 1, b.len+1, f);
+
+            length -= b.len+1;
+            break;
+        }
         case BTYPE_PASS1B:
             b.data[0] = stream_read_bits(s, 8);
             fwrite(b.data, 1, 1, f);
             length -= 1;
             break;
-        case BTYPE_PASS2B:
-            b.data[0] = stream_read_bits(s, 8);
-            b.data[1] = stream_read_bits(s, 8);
-            fwrite(b.data, 1, 2, f);
-            length -= 2;
-            break;
-        case BTYPE_PASS4B:
-            b.data[0] = stream_read_bits(s, 8);
-            b.data[1] = stream_read_bits(s, 8);
-            b.data[2] = stream_read_bits(s, 8);
-            b.data[3] = stream_read_bits(s, 8);
-            fwrite(b.data, 1, 4, f);
-            length -= 4;
+        case BTYPE_PASSMANY:
+            b.len = stream_read_bits(s, PASS_BITS);
+            for (int i = 0; i <= (b.len+1); i++) {
+                uint8_t byte = stream_read_bits(s, 8);
+                fwrite(&byte, 1, 1, f);
+                if (length > 0) {
+                    length -= 1; // hack...
+                }
+            }
             break;
         }
     }

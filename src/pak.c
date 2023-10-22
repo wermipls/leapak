@@ -36,18 +36,18 @@ static inline size_t compare(uint8_t *a, uint8_t *b, size_t bytes)
     return i;
 }
 
-static inline int is_offset_valid(size_t offset, size_t length)
+static inline int is_offset_valid(size_t offset, size_t length, int max_offset)
 {
-    size_t max_offset = OFFSET_MAX + length;
-    return offset < max_offset;
+    size_t max = max_offset + length;
+    return offset < max;
 }
 
-match_t find_best_match(stream_t *s)
+match_t find_best_match(stream_t *s, int max_len, int max_offset)
 {
-    size_t maxlen = smin(LENGTH_MAX, s->pos);
+    size_t maxlen = smin(max_len, s->pos);
     match_t best = {0};
 
-    size_t start = s->pos - smin(OFFSET_MAX + LENGTH_MAX, s->pos);
+    size_t start = s->pos - smin(max_offset + max_len, s->pos);
     size_t end = s->pos;
     size_t remaining = s->len - s->pos;
 
@@ -65,7 +65,7 @@ match_t find_best_match(stream_t *s)
             continue;
         }
 
-        if (!is_offset_valid(end - i, match)) {
+        if (!is_offset_valid(end - i, match, max_offset)) {
             continue;
         }
 
@@ -104,23 +104,23 @@ int write_block(FILE *f, block_t b)
 
     switch (b.type)
     {
-    case BTYPE_PASS4B:
-        t += write_bits(f, b.data[0], 8);
-        t += write_bits(f, b.data[1], 8);
-        t += write_bits(f, b.data[2], 8);
-        t += write_bits(f, b.data[3], 8);
-        break;
-    case BTYPE_PASS2B:
-        t += write_bits(f, b.data[0], 8);
-        t += write_bits(f, b.data[1], 8);
+    case BTYPE_PASSMANY:
+        t += write_bits(f, b.len, PASS_BITS);
+        for (int i = 0; i <= (b.len+1); i++) {
+            t += write_bits(f, b.data[i], 8);
+        }
         break;
     case BTYPE_PASS1B:
         t += write_bits(f, b.data[0], 8);
         break;
     case BTYPE_MATCH:
-        t += write_bits(f, b.offset >> 8, (OFFSET_BITS - 8));
+        t += write_bits(f, b.offset >> 8, (LONG_OFFSET_BITS - 8));
         t += write_bits(f, b.offset, 8);
-        t += write_bits(f, b.len, LENGTH_BITS);
+        t += write_bits(f, b.len, LONG_LENGTH_BITS);
+        break;
+    case BTYPE_MATCH_SHORT:
+        t += write_bits(f, b.offset, SHORT_OFFSET_BITS);
+        t += write_bits(f, b.len, SHORT_LENGTH_BITS);
         break;
     }
 
@@ -162,7 +162,8 @@ int main(int argc, char *argv[])
     }
     size_t curblk = 0;
 
-    blk[curblk].type = BTYPE_PASS4B;
+    blk[curblk].type = BTYPE_PASSMANY;
+    blk[curblk].len = 4-2;
     blk[curblk].data[0] = s->data[0];
     blk[curblk].data[1] = s->data[1];
     blk[curblk].data[2] = s->data[2];
@@ -176,7 +177,19 @@ int main(int argc, char *argv[])
             printf("%d bytes...\n", s->pos);
         }
 
-        match_t best = find_best_match(s);
+        match_t best_long = find_best_match(s, LONG_LENGTH_MAX, LONG_OFFSET_MAX);
+        match_t best_short = find_best_match(s, SHORT_LENGTH_MAX, SHORT_OFFSET_MAX);
+        match_t best;
+        int is_long;
+
+        if (best_short.len+1 >= best_long.len) {
+            best = best_short;
+            is_long = 0;
+        } else {
+            best = best_long;
+            is_long = 1;
+        }
+        
         if (best.len < 3) {
             blk[curblk].type = BTYPE_PASS1B;
             blk[curblk].data[0] = s->data[s->pos];
@@ -185,7 +198,7 @@ int main(int argc, char *argv[])
             continue;
         }
 
-        blk[curblk].type = BTYPE_MATCH;
+        blk[curblk].type = is_long ? BTYPE_MATCH : BTYPE_MATCH_SHORT;
         blk[curblk].offset = s->pos - (best.pos + best.len);
         blk[curblk].len = best.len - 1;
         s->pos += best.len;
@@ -199,36 +212,34 @@ int main(int argc, char *argv[])
     uint32_t length = s->len;
     fwrite(&length, 1, 4, f);
 
-    for (size_t i = 0; i <= curblk; i++) {
-        if (
-               (curblk - i) >= 4 
-            && blk[i+0].type == BTYPE_PASS1B
-            && blk[i+1].type == BTYPE_PASS1B
-        ) {
-            if (
-                   blk[i+2].type == BTYPE_PASS1B
-                && blk[i+3].type == BTYPE_PASS1B
-            ) {
-                block_t b;
-                b.type = BTYPE_PASS4B;
-                b.data[0] = blk[i+0].data[0];
-                b.data[1] = blk[i+1].data[0];
-                b.data[2] = blk[i+2].data[0];
-                b.data[3] = blk[i+3].data[0];
-                final_bitcount += write_block(f, b);
-                i += 3;
-                continue;
-            } else {
-                block_t b;
-                b.type = BTYPE_PASS2B;
-                b.data[0] = blk[i+0].data[0];
-                b.data[1] = blk[i+1].data[0];
-                final_bitcount += write_block(f, b);
-                i += 1;
+    int last_pass = -1; 
+
+    for (size_t i = 0; i < curblk; i++) {
+        if (blk[i].type == BTYPE_PASS1B) {
+            if (last_pass < 0) {
+                last_pass = i;
                 continue;
             }
+
+            if ((i - last_pass) < PASS_MAX) {
+                blk[last_pass].type = BTYPE_PASSMANY;
+                blk[last_pass].data[i-last_pass] = blk[i].data[0];
+                blk[last_pass].len = i-last_pass-1;
+
+                continue;
+            }
+        } 
+        
+        if (last_pass >= 0) {
+            final_bitcount += write_block(f, blk[last_pass]);
+            last_pass = -1;
         }
+
         final_bitcount += write_block(f, blk[i]);
+    }
+
+    if (last_pass >= 0) {
+        final_bitcount += write_block(f, blk[last_pass]);
     }
 
     final_bitcount += write_bits(f, 0, 8); // flush remaining bits
