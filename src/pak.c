@@ -172,6 +172,10 @@ int main(int argc, char *argv[])
     s->pos += 4;
 
     while (s->pos < s->len) {
+        if ((s->pos & ((1<<20)-1)) == 0) {
+            printf("%d bytes...\n", s->pos);
+        }
+
         match_t best = find_best_match(s);
         if (best.len < 3) {
             blk[curblk].type = BTYPE_PASS1B;
