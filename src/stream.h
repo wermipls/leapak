@@ -20,13 +20,11 @@ stream_t *stream_read(const char *fname)
         return NULL;
     }
 
-    stream_t *s = malloc(sizeof(stream_t));
+    stream_t *s = calloc(1, sizeof(stream_t));
     if (!s) {
         fclose(f);
         return NULL;
     }
-
-    s->pos = 0;
 
     fseek(f, 0, SEEK_END);
     s->len = ftell(f);
