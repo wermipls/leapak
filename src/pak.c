@@ -21,6 +21,10 @@ typedef struct match
     size_t len;
 } match_t;
 
+match_t prev_match[PREV_MATCH_MAX];
+size_t prev_match_pos = 0;
+size_t prev_match_count = 0;
+
 static inline size_t compare(uint8_t *a, uint8_t *b, size_t bytes)
 {
     size_t i;
@@ -79,6 +83,41 @@ match_t find_best_match(stream_t *s, int max_len, int max_offset)
     return best;
 }
 
+int try_previous_matches(stream_t *s)
+{
+    int best_valid = -1;
+    
+    for (size_t i = 0; i < smin(PREV_MATCH_MAX, prev_match_count); i++) {
+        match_t cur = prev_match[i];
+
+        if (cur.len > s->len - s->pos) {
+            continue;
+        }
+
+        size_t count = compare(
+            &s->data[cur.pos],
+            &s->data[s->pos],
+            cur.len
+        );
+
+        if (count != cur.len) {
+            continue;
+        }
+
+        if (best_valid >= 0) {
+            match_t best = prev_match[best_valid];
+
+            if (best.len < cur.len) {
+                best_valid = i;
+            }
+        } else {
+            best_valid = i;
+        }
+    }
+
+    return best_valid;
+}
+
 int write_bits(FILE *f, uint8_t data, int bits)
 {
     static uint16_t remainder = 0;
@@ -97,10 +136,18 @@ int write_bits(FILE *f, uint8_t data, int bits)
     return 0;
 }
 
+size_t command_counts[5] = {0,0,0,0,0};
+
 int write_block(FILE *f, block_t b)
 {
     int t = 0;
-    t += write_bits(f, b.type, TYPE_BITS);
+    if (b.type >= 0b110) {
+        t += write_bits(f, b.type>>1, 2);
+        t += write_bits(f, b.type, 1);
+    } else {
+        t += write_bits(f, b.type, 2);
+    }
+    command_counts[b.type]++;
 
     switch (b.type)
     {
@@ -121,6 +168,9 @@ int write_block(FILE *f, block_t b)
     case BTYPE_MATCH_SHORT:
         t += write_bits(f, b.offset, SHORT_OFFSET_BITS);
         t += write_bits(f, b.len, SHORT_LENGTH_BITS);
+        break;
+    case BTYPE_PREV_MATCH:
+        t += write_bits(f, b.offset, PREV_MATCH_BITS);
         break;
     }
 
@@ -189,7 +239,20 @@ int main(int argc, char *argv[])
             best = best_long;
             is_long = 1;
         }
-        
+
+        int best_prev_idx = try_previous_matches(s);
+        if (best_prev_idx >= 0) {
+            match_t best_prev = prev_match[best_prev_idx];
+
+            if (best_prev.len+1 >= best.len) {
+                blk[curblk].type = BTYPE_PREV_MATCH;
+                blk[curblk].offset = best_prev_idx;
+                s->pos += best_prev.len;
+                curblk++;
+                continue;
+            }
+        }
+
         if (best.len < 3) {
             blk[curblk].type = BTYPE_PASS1B;
             blk[curblk].data[0] = s->data[s->pos];
@@ -197,6 +260,10 @@ int main(int argc, char *argv[])
             curblk++;
             continue;
         }
+
+        prev_match[prev_match_pos] = best;
+        prev_match_pos = (prev_match_pos + 1) & (PREV_MATCH_MAX - 1);
+        prev_match_count++;
 
         blk[curblk].type = is_long ? BTYPE_MATCH : BTYPE_MATCH_SHORT;
         blk[curblk].offset = s->pos - (best.pos + best.len);

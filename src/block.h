@@ -16,15 +16,19 @@
 #define PASS_BITS 2
 #define PASS_MAX ((1 << PASS_BITS) + 1)
 
+#define PREV_MATCH_BITS 3
+#define PREV_MATCH_MAX (1 << PREV_MATCH_BITS)
+
 enum btype
 {
-    BTYPE_PASS1B,
-    BTYPE_PASSMANY,
-    BTYPE_MATCH,
-    BTYPE_MATCH_SHORT,
+    BTYPE_PASS1B        = 0b00,
+    BTYPE_MATCH_SHORT   = 0b01,
+    BTYPE_MATCH         = 0b10,
+    BTYPE_PASSMANY      = 0b110,
+    BTYPE_PREV_MATCH    = 0b111,
 };
 
-#define TYPE_BITS 2
+#define TYPE_BITS 3
 
 typedef struct block
 {
