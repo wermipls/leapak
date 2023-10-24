@@ -32,7 +32,7 @@ int main(int argc, char *argv[])
         printf("failed to read file '%s'\n", input);
     }
 
-    uint32_t length = *(uint32_t *)s->data; // hack
+    int64_t length = *(uint32_t *)s->data; // hack
     printf("original length: %d bytes\n", length);
     s->pos += 4;
 
@@ -40,7 +40,7 @@ int main(int argc, char *argv[])
 
     block_t b = {0};
 
-    while (length) {
+    while (length > 0) {
         b.type = stream_read_bits(s, 2);
         if (b.type == 0b11) {
             b.type = (b.type << 1) | stream_read_bits(s, 1);
